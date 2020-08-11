@@ -71,20 +71,6 @@ fn decode_slice(bytes: &[u8], index: &mut usize) -> Result<u32, Error> {
     }
 }
 
-fn readString(packetdata : &[u8], index: &mut usize) -> String {
-    
-    let strlength = decode_slice(packetdata, index).unwrap() as usize;
-
-    let rpos = *index + strlength;
-    let string = ASCII.decode(&packetdata[*index..rpos], DecoderTrap::Strict).unwrap();
-    *index = rpos;
-    return string;
-}
-
-// fn read_i16(packetdata : &[u8], index: &mut usize) -> i16 {
-
-// }
-
 fn construct_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(ACCEPT, HeaderValue::from_str("*/*").unwrap());  
@@ -128,6 +114,65 @@ fn get_screenshot() -> Result<(), Error> {
     Ok(())
 }
 
+struct ReplayReader {
+    pos: usize,
+    map: Mmap
+}
+
+impl ReplayReader {
+    pub fn new(map: Mmap) -> Self {
+        ReplayReader {
+            pos: 0,
+            map: map
+        }
+    }
+
+    pub fn read_string(&mut self) -> String {
+        let strlength = decode_slice(&self.map, &mut self.pos).unwrap() as usize;
+
+        let rpos = self.pos + strlength;
+        let string = ASCII.decode(&self.map[self.pos..rpos], DecoderTrap::Strict).unwrap();
+        self.pos = rpos;
+        string
+    }
+
+    pub fn read_i32(&mut self) -> i32 {
+        let integer = LittleEndian::read_i32(&self.map[self.pos..self.pos+4]);
+        self.pos += 4;
+        integer
+    }
+
+    pub fn read_u32(&mut self) -> u32 {
+        let integer = LittleEndian::read_u32(&self.map[self.pos..self.pos+4]);
+        self.pos += 4;
+        integer
+    }
+
+    pub fn read_i16(&mut self) -> i16 {
+        let integer = LittleEndian::read_i16(&self.map[self.pos..self.pos+2]);
+        self.pos += 2;
+        integer
+    }
+
+    pub fn at_relative_offset(&self, offset: usize) -> u8 {
+        self.map[self.pos + offset]
+    }
+
+    pub fn read_u8(&mut self) -> u8 {        
+        let byte = self.map[self.pos];
+        self.pos += 1;
+        byte
+    }
+
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
+    pub fn set_pos(&mut self, pos: usize) {
+        self.pos = pos;
+    }
+}
+
 fn main() -> Result<(), Error> {
     println!("Hello, world!");
     let opts: Opts = Opts::parse();
@@ -138,92 +183,81 @@ fn main() -> Result<(), Error> {
     let file = File::open(opts.replay_filename)?;
 
     let map = unsafe { Mmap::map(&file)? };
-    let mut index = 0 as usize;
+    let mut reader = ReplayReader::new(map);
     loop {
-        println!("---------------- index is {}", index);
-        let client = LittleEndian::read_i32(&map[index..index+4]);
+        println!("---------------- index is {}", reader.pos());
+        let client = reader.read_i32();
         if (client == -1) {
             break;
         }
-        index += 4;
-        let packetLen = LittleEndian::read_i32(&map[index..index+4]) as usize;
-        index += 4;
-        let rpos: usize = index + packetLen as usize;
+        let packetLen = reader.read_i32() as usize;
+        let rpos: usize = reader.pos() + packetLen as usize;
         // let packetdata = &map[index..rpos]; //omit client and packetLen
         println!("client is {}", client);
         println!("packetlen is {}", packetLen);
-        if packetLen == 5 && map[index+4] == OrderType::Disconnect as u8 {
-            index += packetLen;
+        if packetLen == 5 && reader.at_relative_offset(4) == OrderType::Disconnect as u8 {
+            reader.set_pos(reader.pos() + packetLen);
             continue; // disconnect
-        } else if (packetLen >= 5 && map[index+4] == OrderType::SyncHash as u8) {
-            index += packetLen;
+        } else if (packetLen >= 5 && reader.at_relative_offset(4) == OrderType::SyncHash as u8) {
+            reader.set_pos(reader.pos() + packetLen);
             println!("synchash continue");
             continue; // sync
         }
 
-        index += 4 as usize; //we don't care about the frame number
+        let frame = reader.read_i32();
         
-        while index < rpos {
-            let ordertypebyte = map[index];
+        while reader.pos() < rpos {
+            let ordertypebyte = reader.read_u8();
             let ordertype = OrderType::try_from(ordertypebyte).unwrap();
             println!("order type is {:?}", ordertype);
-            index += 1;
             match ordertype {
                 OrderType::Handshake => {
                    
-                        let name = readString(&map, &mut index);
+                        let name = reader.read_string();
                         println!("name {}", name);
-                        let targetstring = readString(&map, &mut index);
+                        let targetstring = reader.read_string();
                         println!("targetstring {}", targetstring);
                 },
                 OrderType::Fields => {
-                    let order = readString(&map, &mut index);
+                    let order = reader.read_string();
                     
                     let mut flags = 0;
                     if (flagsAreShort) {
-                         flags = LittleEndian::read_i16(&map[index..index+2]);
-                         index += 2;
+                         flags = reader.read_i16();
                     } else {
-                        flags = map[index] as i16;
-                        index += 1;
+                        flags = reader.read_u8() as i16;
                     }
                     println!("order {}, flags {:#02x}", order, flags);
 
                     
                     if (flags & OrderFields::Subject as i16 > 0) {
-                        let subject_id = LittleEndian::read_u32(&map[index..index+4]);
-                        index += 4;
+                        let subject_id = reader.read_u32();
                     }
                     if (flags & OrderFields::Target as i16 > 0) {
-                        let target_type_byte = map[index];
-                        index += 1;
+                        let target_type_byte = reader.read_u8();
                         let target_type = TargetType::try_from(target_type_byte).unwrap();
                         println!("target type is {:?}", target_type);
                         match target_type {
                             TargetType::Actor => {
-                                let actor_id = LittleEndian::read_u32(&map[index..index+4]);
-                                index += 4;
+                                let actor_id = reader.read_u32();
 
                             },
                             TargetType::FrozenActor => {
-                                let player_actor_id =  LittleEndian::read_u32(&map[index..index+4]);
-                                index += 4;
-                                let frozen_actor_id =  LittleEndian::read_u32(&map[index..index+4]);
-                                index += 4;
+                                let player_actor_id =  reader.read_u32();
+                                let frozen_actor_id =  reader.read_u32();
                             },
                             TargetType::Terrain => {
                                    if (flags & OrderFields::TargetIsCell as i16 > 0) {
-                                        let cell =  LittleEndian::read_u32(&map[index..index+4]);
-                                        index += 4; 
-                                        let subcell = map[index];
-                                        index += 1;
+                                        let cell =  reader.read_u32();
+                                        let x = cell >> 20 as i16;
+                                        let y = ((cell >> 8) & 0xFFF) as i16;
+                                        let z = cell as u8;
+                                        println!("to {},{},{}", x, y, z);
+                                        let subcell = reader.read_u8();
                                    } else {
-                                        let x =  LittleEndian::read_u32(&map[index..index+4]);
-                                        index += 4; 
-                                        let y =  LittleEndian::read_u32(&map[index..index+4]);
-                                        index += 4; 
-                                        let z =  LittleEndian::read_u32(&map[index..index+4]);
-                                        index += 4; 
+                                        let x =  reader.read_u32();
+                                        let y =  reader.read_u32();
+                                        let z = reader.read_u32();
                                    }
                             },
                             _ => {
@@ -233,34 +267,28 @@ fn main() -> Result<(), Error> {
                         }
                     }
                     if (flags & OrderFields::TargetString as i16 > 0) {
-                        let target_string = readString(&map, &mut index);
+                        let target_string = reader.read_string();
                         println!("target_string {}", target_string);
                     }
                     if (flags & OrderFields::ExtraActors as i16 > 0) {
-                        let count =  LittleEndian::read_u32(&map[index..index+4]);
-                        index += 4; 
+                        let count =  reader.read_u32();
                         let mut vec = Vec::new();
                         for i in 0..count {
-                            let tmp =  LittleEndian::read_u32(&map[index..index+4]);
-                            index += 4; 
+                            let tmp =  reader.read_u32();
                             vec.push(tmp)
                         }
                     }
                     if (flags & OrderFields::ExtraLocation as i16 > 0) {
-                        let pos =  LittleEndian::read_i32(&map[index..index+4]);
-                            index += 4; 
+                        let pos =  reader.read_i32();                        
                     }
                     if (flags & OrderFields::ExtraData as i16 > 0) {
-                        let extradata =  LittleEndian::read_u32(&map[index..index+4]);
-                        index += 4; 
+                        let extradata =  reader.read_u32();
                     }
                     if (flags & OrderFields::Grouped as i16 > 0) {
-                        let count =  LittleEndian::read_i32(&map[index..index+4]);
-                        index += 4; 
+                        let count =  reader.read_i32();
                         let mut vec = Vec::new();
                         for i in 0..count {
-                            let tmp =  LittleEndian::read_u32(&map[index..index+4]);
-                            index += 4; 
+                            let tmp =  reader.read_u32();
                             vec.push(tmp)
                         }
                     }
