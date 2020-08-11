@@ -1,0 +1,20 @@
+[package]
+name = "openra-heatmap"
+version = "0.1.0"
+authors = ["Paul Praet <3198728+praetp@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "3.0.0-beta.1"
+memmap = "0.7.*"
+byteorder = "1.1.*"
+encoding = "0.2.*"
+num_enum = "0.5.1"
+vlq-rust = "0.3.*"
+anyhow = "1.0.*"
+serde_json = "1.0.*"
+[dependencies.reqwest]
+version = "0.10.*"
+features = ["blocking", "json"]
