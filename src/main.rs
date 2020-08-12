@@ -5,13 +5,14 @@ use std::io::{Write, Error, ErrorKind};
 use std::io::Read;
 use byteorder::{ByteOrder, LittleEndian};
 use encoding::all::ASCII;
-use encoding::all::ISO_8859_1;
+use encoding::all::UTF_8;
 use encoding::{Encoding, ByteWriter, EncoderTrap, DecoderTrap};
 use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
 use serde_json::{Value};
 use std::io::copy;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, CONTENT_ENCODING, ACCEPT};
+
 
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Paul P.")]
@@ -136,6 +137,14 @@ impl ReplayReader {
         string
     }
 
+    pub fn read_utf8_string(&mut self, strlength: usize) -> String {
+
+        let rpos = self.pos + strlength;
+        let string = UTF_8.decode(&self.map[self.pos..rpos], DecoderTrap::Strict).unwrap();
+        self.pos = rpos;
+        string
+    }
+
     pub fn read_i32(&mut self) -> i32 {
         let integer = LittleEndian::read_i32(&self.map[self.pos..self.pos+4]);
         self.pos += 4;
@@ -173,6 +182,30 @@ impl ReplayReader {
     }
 }
 
+struct CPos {
+    x: i16,
+    y: i16,
+    z: u8
+}
+
+enum CommandType {
+    MOVE,
+    ATTACK_MOVE
+}
+
+struct Command {
+    client_id: i32,
+    position: CPos,
+    command_type: CommandType
+}
+
+struct Player {
+    client_id: i32,
+    name: String,
+    color: i32
+}
+
+
 fn main() -> Result<(), Error> {
     println!("Hello, world!");
     let opts: Opts = Opts::parse();
@@ -181,8 +214,9 @@ fn main() -> Result<(), Error> {
     let flagsAreShort = false; //look at the version instead
 
     let file = File::open(opts.replay_filename)?;
-
+    // let mut vec = Vec::new();
     let map = unsafe { Mmap::map(&file)? };
+    let total_len = map.len();
     let mut reader = ReplayReader::new(map);
     loop {
         println!("---------------- index is {}", reader.pos());
@@ -204,8 +238,14 @@ fn main() -> Result<(), Error> {
             continue; // sync
         }
 
+
+        let file = File::open("tests/reftest/images/extraneous-data.jpg").expect("failed to open file");
+        let mut decoder = Decoder::new(BufReader::new(file));
+        let pixels = decoder.decode().expect("failed to decode image");
+        let metadata = decoder.info().unwrap();
+
         let frame = reader.read_i32();
-        
+        let mut sync_info: String;
         while reader.pos() < rpos {
             let ordertypebyte = reader.read_u8();
             let ordertype = OrderType::try_from(ordertypebyte).unwrap();
@@ -247,18 +287,24 @@ fn main() -> Result<(), Error> {
                                 let frozen_actor_id =  reader.read_u32();
                             },
                             TargetType::Terrain => {
-                                   if (flags & OrderFields::TargetIsCell as i16 > 0) {
+                                   let coordinates = if (flags & OrderFields::TargetIsCell as i16 > 0) {
                                         let cell =  reader.read_u32();
-                                        let x = cell >> 20 as i16;
+                                        let x = (cell >> 20) as i16;
                                         let y = ((cell >> 8) & 0xFFF) as i16;
                                         let z = cell as u8;
                                         println!("to {},{},{}", x, y, z);
                                         let subcell = reader.read_u8();
+                                        CPos {
+                                            x, y, z
+                                        }
                                    } else {
-                                        let x =  reader.read_u32();
-                                        let y =  reader.read_u32();
-                                        let z = reader.read_u32();
-                                   }
+                                        let x =  reader.read_u32() as i16;
+                                        let y =  reader.read_u32() as i16;
+                                        let z = reader.read_u32() as u8;
+                                        CPos {
+                                            x, y, z
+                                        }
+                                   };
                             },
                             _ => {
                                 panic!("wtf");
@@ -269,6 +315,9 @@ fn main() -> Result<(), Error> {
                     if (flags & OrderFields::TargetString as i16 > 0) {
                         let target_string = reader.read_string();
                         println!("target_string {}", target_string);
+                        if (order == "SyncInfo") {
+                            sync_info =  target_string; //store the latest
+                        }
                     }
                     if (flags & OrderFields::ExtraActors as i16 > 0) {
                         let count =  reader.read_u32();
@@ -311,6 +360,57 @@ fn main() -> Result<(), Error> {
         //return Ok(());
     }
     println!("now read in the metadata");
-  
+    
+    reader.set_pos(total_len - 8);
+    let metadata_len = reader.read_i32() as usize;
+    println!("len = {}", metadata_len);
+    let marker = reader.read_i32();
+    if (marker == -2) {
+        println!("OK");
+    } else {
+        println!("NOK");
+    }
+    reader.set_pos(total_len - (8 + metadata_len + 8));
+    let start_marker = reader.read_i32();
+    if (start_marker != -1) {
+        panic!("Expected start marker");
+    }
+    let version = reader.read_i32();
+    println!("version is {}", version);
+    let strlen = reader.read_i32() as usize;
+    /* this string is encoded differently than all other strings.. */
+    let metadata = reader.read_utf8_string(strlen);
+    println!("metadata {}", metadata);
+    let lines: Vec<_> = metadata.lines().collect();
+    let mut client_id:Option<i32> = None;
+    let mut name = None;
+    let mut color = None;
+    for l in lines {
+        let trimmed = l.trim();
+        if trimmed.starts_with("Player@") {
+            if client_id.is_some() {
+                
+
+                client_id = None;
+                name = None;
+                color = None;
+            }
+           
+
+        } else if trimmed.starts_with("ClientIndex:") {
+            client_id = Some(get_rhs(trimmed).parse().unwrap());
+        } else if trimmed.starts_with("Name:") {
+            name = Some(get_rhs(trimmed));
+        } else if trimmed.starts_with("Color:") {
+            color = Some(get_rhs(trimmed));
+        } else if trimmed.starts_with("MapUid:") {
+            let map_uid = get_rhs(trimmed);
+            println!("mapuid is {}", map_uid);
+        }
+    }
     Ok(())
+}
+
+fn get_rhs(line: &str) -> &str {
+   line.rsplitn(2, ' ').next().unwrap()
 }
