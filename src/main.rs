@@ -132,12 +132,12 @@ impl ReplayReader {
         let strlength = decode_slice(&self.map, &mut self.pos).unwrap() as usize;
 
         let rpos = self.pos + strlength;
-        let string = ASCII.decode(&self.map[self.pos..rpos], DecoderTrap::Strict).unwrap();
+        let string = UTF_8.decode(&self.map[self.pos..rpos], DecoderTrap::Replace).unwrap();
         self.pos = rpos;
         string
     }
 
-    pub fn read_utf8_string(&mut self, strlength: usize) -> String {
+    pub fn read_string_with_length(&mut self, strlength: usize) -> String {
 
         let rpos = self.pos + strlength;
         let string = UTF_8.decode(&self.map[self.pos..rpos], DecoderTrap::Strict).unwrap();
@@ -237,12 +237,6 @@ fn main() -> Result<(), Error> {
             println!("synchash continue");
             continue; // sync
         }
-
-
-        let file = File::open("tests/reftest/images/extraneous-data.jpg").expect("failed to open file");
-        let mut decoder = Decoder::new(BufReader::new(file));
-        let pixels = decoder.decode().expect("failed to decode image");
-        let metadata = decoder.info().unwrap();
 
         let frame = reader.read_i32();
         let mut sync_info: String;
@@ -379,7 +373,7 @@ fn main() -> Result<(), Error> {
     println!("version is {}", version);
     let strlen = reader.read_i32() as usize;
     /* this string is encoded differently than all other strings.. */
-    let metadata = reader.read_utf8_string(strlen);
+    let metadata = reader.read_string_with_length(strlen);
     println!("metadata {}", metadata);
     let lines: Vec<_> = metadata.lines().collect();
     let mut client_id:Option<i32> = None;
