@@ -128,6 +128,10 @@ impl ReplayReader {
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
     pub fn read_string(&mut self) -> String {
         let strlength = decode_slice(&self.map, &mut self.pos).unwrap() as usize;
 
@@ -205,6 +209,69 @@ struct Player {
     color: i32
 }
 
+struct GameInformation {
+    map_uid : String,
+    players: Vec<Player>
+}
+
+fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
+ 
+    let total_len = reader.len();
+    reader.set_pos(total_len - 8);
+    let metadata_len = reader.read_i32() as usize;
+    println!("len = {}", metadata_len);
+    let marker = reader.read_i32();
+    if (marker == -2) {
+        println!("OK");
+    } else {
+        println!("NOK");
+    }
+    reader.set_pos(total_len - (8 + metadata_len + 8));
+    let start_marker = reader.read_i32();
+    if (start_marker != -1) {
+        panic!("Expected start marker");
+    }
+    let version = reader.read_i32();
+    println!("version is {}", version);
+    let strlen = reader.read_i32() as usize;
+    /* this string is encoded differently than all other strings.. */
+    let metadata = reader.read_string_with_length(strlen);
+    println!("metadata {}", metadata);
+    let lines: Vec<_> = metadata.lines().collect();
+    let mut client_id:Option<i32> = None;
+    let mut name = None;
+    let mut color = None;
+    let mut players: Vec<Player> = Vec::new();
+    let mut map_uid = None;
+    for l in lines {
+        let trimmed = l.trim();
+        if trimmed.starts_with("Player@") {
+            if client_id.is_some() {
+                
+
+                client_id = None;
+                name = None;
+                color = None;
+            }
+           
+
+        } else if trimmed.starts_with("ClientIndex:") {
+            client_id = Some(get_rhs(trimmed).parse().unwrap());
+        } else if trimmed.starts_with("Name:") {
+            name = Some(get_rhs(trimmed));
+        } else if trimmed.starts_with("Color:") {
+            color = Some(get_rhs(trimmed));
+        } else if trimmed.starts_with("MapUid:") {
+             map_uid = Some(get_rhs(trimmed));
+            println!("mapuid is {}", map_uid.unwrap());
+        }
+    }
+    reader.set_pos(0); //reset to beginning
+    GameInformation {
+        map_uid : map_uid.expect("mapuid must be present").to_string(),
+        players
+    }
+}
 
 fn main() -> Result<(), Error> {
     println!("Hello, world!");
@@ -218,6 +285,7 @@ fn main() -> Result<(), Error> {
     let map = unsafe { Mmap::map(&file)? };
     let total_len = map.len();
     let mut reader = ReplayReader::new(map);
+    let game_information = get_game_information(&mut reader);
     loop {
         println!("---------------- index is {}", reader.pos());
         let client = reader.read_i32();
@@ -354,54 +422,7 @@ fn main() -> Result<(), Error> {
         //return Ok(());
     }
     println!("now read in the metadata");
-    
-    reader.set_pos(total_len - 8);
-    let metadata_len = reader.read_i32() as usize;
-    println!("len = {}", metadata_len);
-    let marker = reader.read_i32();
-    if (marker == -2) {
-        println!("OK");
-    } else {
-        println!("NOK");
-    }
-    reader.set_pos(total_len - (8 + metadata_len + 8));
-    let start_marker = reader.read_i32();
-    if (start_marker != -1) {
-        panic!("Expected start marker");
-    }
-    let version = reader.read_i32();
-    println!("version is {}", version);
-    let strlen = reader.read_i32() as usize;
-    /* this string is encoded differently than all other strings.. */
-    let metadata = reader.read_string_with_length(strlen);
-    println!("metadata {}", metadata);
-    let lines: Vec<_> = metadata.lines().collect();
-    let mut client_id:Option<i32> = None;
-    let mut name = None;
-    let mut color = None;
-    for l in lines {
-        let trimmed = l.trim();
-        if trimmed.starts_with("Player@") {
-            if client_id.is_some() {
-                
-
-                client_id = None;
-                name = None;
-                color = None;
-            }
-           
-
-        } else if trimmed.starts_with("ClientIndex:") {
-            client_id = Some(get_rhs(trimmed).parse().unwrap());
-        } else if trimmed.starts_with("Name:") {
-            name = Some(get_rhs(trimmed));
-        } else if trimmed.starts_with("Color:") {
-            color = Some(get_rhs(trimmed));
-        } else if trimmed.starts_with("MapUid:") {
-            let map_uid = get_rhs(trimmed);
-            println!("mapuid is {}", map_uid);
-        }
-    }
+   
     Ok(())
 }
 
