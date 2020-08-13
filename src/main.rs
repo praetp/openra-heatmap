@@ -12,7 +12,7 @@ use std::convert::TryFrom;
 use serde_json::{Value};
 use std::io::copy;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, CONTENT_ENCODING, ACCEPT};
-
+use std::collections::HashMap;
 
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Paul P.")]
@@ -211,10 +211,19 @@ struct Player {
 
 struct GameInformation {
     map_uid : String,
-    players: Vec<Player>
+    players: HashMap<i32, Player>
 }
 
 fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
+
+    fn save_player(players: &mut HashMap<i32, Player>, client_id: Option<i32>, name: Option<&str>, color: Option<&str>) -> () {
+        let client_id_raw = client_id.expect("client id must be present");
+        players.insert(client_id_raw, Player {
+            client_id: client_id_raw,
+            name: name.expect("name must be present").to_string(),
+            color: i32::from_str_radix(color.expect("color must be present"), 16).expect("could not parse color")
+        });
+    }
  
     let total_len = reader.len();
     reader.set_pos(total_len - 8);
@@ -239,15 +248,15 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
     println!("metadata {}", metadata);
     let lines: Vec<_> = metadata.lines().collect();
     let mut client_id:Option<i32> = None;
-    let mut name = None;
-    let mut color = None;
-    let mut players: Vec<Player> = Vec::new();
+    let mut name: Option<&str> = None;
+    let mut color: Option<&str> = None;
+    let mut players: HashMap<i32, Player> = HashMap::new();
     let mut map_uid = None;
     for l in lines {
         let trimmed = l.trim();
         if trimmed.starts_with("Player@") {
             if client_id.is_some() {
-                
+                save_player(&mut players, client_id, name, color);
 
                 client_id = None;
                 name = None;
@@ -266,6 +275,7 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
             println!("mapuid is {}", map_uid.unwrap());
         }
     }
+    save_player(&mut players, client_id, name, color);
     reader.set_pos(0); //reset to beginning
     GameInformation {
         map_uid : map_uid.expect("mapuid must be present").to_string(),
