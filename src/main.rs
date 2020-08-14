@@ -13,6 +13,18 @@ use serde_json::{Value};
 use std::io::copy;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, CONTENT_ENCODING, ACCEPT};
 use std::collections::HashMap;
+use image::GenericImageView;
+use image::DynamicImage;
+use image::{Pixel, Pixels};
+use image::{ImageBuffer, Rgb, Rgba};
+use imageproc::drawing::{Canvas, Blend};
+use rusttype::Font;
+use rusttype::Scale;
+use regex::Regex;
+// use hyper::header::{Headers, ContentDisposition, DispositionType, DispositionParam, Charset};
+
+#[macro_use] extern crate lazy_static;
+use bytes::Buf;
 
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Paul P.")]
@@ -20,9 +32,6 @@ struct Opts {
     replay_filename: String
 }
 
-struct Packet {
-
-}
 #[derive(Debug, Eq, PartialEq, TryFromPrimitive)]
 #[repr(u8)]
 enum TargetType { Invalid, Actor, Terrain, FrozenActor }
@@ -78,41 +87,102 @@ fn construct_headers() -> HeaderMap {
     headers
 }
 
-fn get_screenshot() -> Result<(), Error> {
-
+//if https://github.com/OpenRA/OpenRA-Resources/pull/365 get submitted we don't have to do this anymore
+fn find_screenshot_id(map_id : u32) -> Option<u32> {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(r"/screenshots/(\d+)/").unwrap();
+    }
     let client = reqwest::blocking::Client::new();
-    let response = client                        
-                        .get("https://resource.openra.net/map/hash/9ea6b2cb97cd8fca36a5896b1ebec0a3d06381d0")
+    let url = format!("{}/{}", "https://resource.openra.net/maps", map_id);
+    let mut response = client                        
+                        .get(&url)
                         .headers(construct_headers())
                         .send()
                         .unwrap();
-    println!("Response: {:?}", response);
-    let map_info: Value = response.json().unwrap();
-    println!("map_info: {:?}", map_info);
-    let object = &map_info[0];
-    println!("object: {:?}", object);
-    let height = object["height"].as_str();
-    println!("height: {:?}", height);
-    let id = object["id"].as_u64();
-    println!("id: {:?}", id);
-    let url = ["https://resource.openra.net/screenshots/", &id.unwrap().to_string()].concat();
-    let response = client.get(&url).send().unwrap();
-    let mut dest = {
-        let fname = response
-            .url()
-            .path_segments()
-            .and_then(|segments| segments.last())
-            .and_then(|name| if name.is_empty() { None } else { Some(name) })
-            .unwrap_or("tmp.bin");
+    println!("response {:?}", response);
+    let buffer = response.text().expect("cannot read response");
+    println!("buffer {}", buffer);
 
-        println!("file to download: '{}'", fname);
-        // let fname = tmp_dir.path().join(fname);
-        println!("will be located under: '{:?}'", fname);
-        File::create(fname)?
-    };
-    let content =  response.text().unwrap();
-    copy(&mut content.as_bytes(), &mut dest)?;
-    Ok(())
+    
+    if RE.is_match(&buffer) {
+        let caps = RE.captures(&buffer).unwrap();
+        return Some(caps.get(1).map_or(0, |m| m.as_str().parse::<u32>().expect("Cannot parse screenshot id")));
+    } else {
+        return None;
+    }
+
+ // let id = object["id"].as_u64();
+    // println!("id: {:?}", id);
+    // let url = ["https://resource.openra.net/screenshots/", &id.unwrap().to_string()].concat();
+    // let response = client.get(&url).send().unwrap();
+    // let mut dest = {
+    //     let fname = response
+    //         .url()
+    //         .path_segments()
+    //         .and_then(|segments| segments.last())
+    //         .and_then(|name| if name.is_empty() { None } else { Some(name) })
+    //         .unwrap_or("tmp.bin");
+
+    //     println!("file to download: '{}'", fname);
+    //     // let fname = tmp_dir.path().join(fname);
+    //     println!("will be located under: '{:?}'", fname);
+    //     File::create(fname)?
+    // };
+    // let content =  response.text().unwrap();
+    // copy(&mut content.as_bytes(), &mut dest)?;
+    // Ok(())
+
+}
+
+struct MapInfo {
+    id: u32,
+    width: u16,
+    height: u16
+}
+
+fn get_map_info(hash: &str) -> Result<MapInfo, Error> {
+
+    let client = reqwest::blocking::Client::new();
+    let url = format!("{}/{}", "https://resource.openra.net/map/hash/", hash);
+    let response = client                        
+                        .get(&url)
+                        .headers(construct_headers())
+                        .send()
+                        .unwrap();
+    // println!("Response: {:?}", response);
+    let map_info: Value = response.json().unwrap();
+    // println!("map_info: {:?}", map_info);
+    let object = &map_info[0];
+    let id = object["id"].as_u64().unwrap() as u32;
+    // println!("object: {:?}", object);
+    let height = object["height"].as_str().unwrap().parse::<u16>().expect("cannot parse height");
+    // println!("height: {:?}", height);
+    let width = object["width"].as_str().unwrap().parse::<u16>().expect("cannot parse width");
+    // println!("width: {:?}", width);
+
+    
+
+    Ok(MapInfo {
+        id,
+        width,
+        height
+    })
+
+   
+}
+
+fn read_screenshot(path: &str) -> DynamicImage {
+    // Use the open function to load an image from a Path.
+    // `open` returns a `DynamicImage` on success.
+    let img = image::open(path).unwrap();
+
+    // The dimensions method returns the images width and height.
+    println!("dimensions {:?}",GenericImageView::dimensions(&img));
+
+    // The color method returns the image's `ColorType`.
+    println!("{:?}", img.color());
+
+    img
 }
 
 struct ReplayReader {
@@ -186,27 +256,15 @@ impl ReplayReader {
     }
 }
 
-struct CPos {
-    x: i16,
-    y: i16,
-    z: u8
-}
-
 enum CommandType {
     MOVE,
     ATTACK_MOVE
 }
 
-struct Command {
-    client_id: i32,
-    position: CPos,
-    command_type: CommandType
-}
-
 struct Player {
     client_id: i32,
     name: String,
-    color: i32
+    color: Rgba<u8>
 }
 
 struct GameInformation {
@@ -214,26 +272,49 @@ struct GameInformation {
     players: HashMap<i32, Player>
 }
 
+fn download_screenshot(screenshot_id : u32) -> String {
+    let client = reqwest::blocking::Client::new(); //TODO SHARE CLIENTS
+   
+    let url = format!("{}/{}", "https://resource.openra.net/screenshots", screenshot_id);
+    let response = client.get(&url).send();
+    println!("Response {:?}", response);
+    let response = response.expect("response problem");
+    let header = response.headers().get(reqwest::header::CONTENT_DISPOSITION).expect("Expected content-disposition");
+    let disp = header.to_str().expect("header was not a string");
+
+    let fname = format!("{}.png", screenshot_id);
+    let mut dest = {
+        
+        println!("file to download: '{}'", fname);
+        // let fname = tmp_dir.path().join(fname);
+        println!("will be located under: '{:?}'", fname);
+        File::create(fname.clone()).expect("Could not create file")
+    };
+    let content =  response.bytes().expect("Could not get bytes");
+    dest.write_all(content.bytes()).expect("Could not write");
+    fname
+}
+
 fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
 
     fn save_player(players: &mut HashMap<i32, Player>, client_id: Option<i32>, name: Option<&str>, color: Option<&str>) -> () {
         let client_id_raw = client_id.expect("client id must be present");
+        let color =  i32::from_str_radix(color.expect("color must be present"), 16).expect("could not parse color");
+        let color_vector = [(color >> 16) as u8, (color >> 8) as u8, color as u8, 255];
         players.insert(client_id_raw, Player {
             client_id: client_id_raw,
             name: name.expect("name must be present").to_string(),
-            color: i32::from_str_radix(color.expect("color must be present"), 16).expect("could not parse color")
+            color: Rgba(color_vector)
         });
     }
  
+    print!("Reading in metadata...");
     let total_len = reader.len();
     reader.set_pos(total_len - 8);
     let metadata_len = reader.read_i32() as usize;
-    println!("len = {}", metadata_len);
     let marker = reader.read_i32();
-    if (marker == -2) {
-        println!("OK");
-    } else {
-        println!("NOK");
+    if (marker != -2) {
+        panic!("End marker NOK")
     }
     reader.set_pos(total_len - (8 + metadata_len + 8));
     let start_marker = reader.read_i32();
@@ -284,51 +365,61 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
 }
 
 fn main() -> Result<(), Error> {
-    println!("Hello, world!");
+    const RED : Rgba<u8> = Rgba([255, 0 , 0, 255]);
+    const GREEN : Rgba<u8>= Rgba([0, 255 , 0, 255]);
+    const BLUE : Rgba<u8> = Rgba([0, 0 , 255, 255]);
     let opts: Opts = Opts::parse();
     println!("Reading replay file from : {}", opts.replay_filename);
 
     let flagsAreShort = false; //look at the version instead
 
     let file = File::open(opts.replay_filename)?;
-    // let mut vec = Vec::new();
     let map = unsafe { Mmap::map(&file)? };
     let total_len = map.len();
     let mut reader = ReplayReader::new(map);
     let game_information = get_game_information(&mut reader);
+    let map_info = get_map_info(&game_information.map_uid);
+    
+    let screenshot_id = find_screenshot_id(map_info.unwrap().id);
+    println!("screenshot id {:#?}", screenshot_id);
+    if screenshot_id.is_none() {
+        println!("Unfortunately, no screenshot is available for download.. Maybe you could upload one ?");
+        return Ok(());
+    }
+    let screenshot = download_screenshot(screenshot_id.unwrap());
+    let mut image = read_screenshot(&screenshot);
+
+    // return Ok(());
+
+    println!("Reading in frames..");
     loop {
-        println!("---------------- index is {}", reader.pos());
         let client = reader.read_i32();
+        
         if (client == -1) {
             break;
         }
+        
+       
         let packetLen = reader.read_i32() as usize;
         let rpos: usize = reader.pos() + packetLen as usize;
-        // let packetdata = &map[index..rpos]; //omit client and packetLen
-        println!("client is {}", client);
-        println!("packetlen is {}", packetLen);
+     
         if packetLen == 5 && reader.at_relative_offset(4) == OrderType::Disconnect as u8 {
             reader.set_pos(reader.pos() + packetLen);
             continue; // disconnect
         } else if (packetLen >= 5 && reader.at_relative_offset(4) == OrderType::SyncHash as u8) {
             reader.set_pos(reader.pos() + packetLen);
-            println!("synchash continue");
             continue; // sync
         }
 
         let frame = reader.read_i32();
-        let mut sync_info: String;
         while reader.pos() < rpos {
             let ordertypebyte = reader.read_u8();
             let ordertype = OrderType::try_from(ordertypebyte).unwrap();
-            println!("order type is {:?}", ordertype);
             match ordertype {
                 OrderType::Handshake => {
                    
                         let name = reader.read_string();
-                        println!("name {}", name);
                         let targetstring = reader.read_string();
-                        println!("targetstring {}", targetstring);
                 },
                 OrderType::Fields => {
                     let order = reader.read_string();
@@ -339,7 +430,7 @@ fn main() -> Result<(), Error> {
                     } else {
                         flags = reader.read_u8() as i16;
                     }
-                    println!("order {}, flags {:#02x}", order, flags);
+                    // println!("order {}, flags {:#02x}", order, flags);
 
                     
                     if (flags & OrderFields::Subject as i16 > 0) {
@@ -348,7 +439,7 @@ fn main() -> Result<(), Error> {
                     if (flags & OrderFields::Target as i16 > 0) {
                         let target_type_byte = reader.read_u8();
                         let target_type = TargetType::try_from(target_type_byte).unwrap();
-                        println!("target type is {:?}", target_type);
+                        // println!("target type is {:?}", target_type);
                         match target_type {
                             TargetType::Actor => {
                                 let actor_id = reader.read_u32();
@@ -359,37 +450,63 @@ fn main() -> Result<(), Error> {
                                 let frozen_actor_id =  reader.read_u32();
                             },
                             TargetType::Terrain => {
-                                   let coordinates = if (flags & OrderFields::TargetIsCell as i16 > 0) {
+                                   if (flags & OrderFields::TargetIsCell as i16 > 0) {
                                         let cell =  reader.read_u32();
-                                        let x = (cell >> 20) as i16;
-                                        let y = ((cell >> 8) & 0xFFF) as i16;
-                                        let z = cell as u8;
-                                        println!("to {},{},{}", x, y, z);
+                                        let world_x = (cell >> 20) as i16;
+                                        let world_y = ((cell >> 8) & 0xFFF) as i16;
+                                        let world_z = cell as u8;
                                         let subcell = reader.read_u8();
-                                        CPos {
-                                            x, y, z
+                                       
+                                        let player = game_information.players.get(&client).expect("unknown client-id");
+                                        
+                                        
+                                        //improve https://users.rust-lang.org/t/how-do-i-copy-contents-of-image-into-an-image-buffer/33206/5
+
+                                        for xd in -4..5 {
+                                            for yd in -4..5 {
+                                                let x = (7.5 + world_x as f32 * 15.35) as i16 + xd;
+                                                let y = (7.5 + world_y as f32 * 15.35) as i16 + yd;
+                                                let pixel = if 2 < i16::abs(xd) || 2 < i16::abs(yd) {
+                                                    if order == "AttackMove" || order == "AssaultMove" || order == "ForceAttack" || order == "Move" || order == "PlaceBuilding" {
+                                                        Some(player.color)
+                                                    } else {
+                                                        None
+                                                    }    
+                                                } else {
+                                                    if order == "AttackMove" || order == "AssaultMove" || order == "ForceAttack" {                                                        
+                                                        Some(RED)
+                                                    } else if order == "Move" {
+                                                        Some(GREEN)
+                                                    }  else if order == "PlaceBuilding" {
+                                                        Some(BLUE)
+                                                    } else if order == "SetRallyPoint" || order == "Harvest" || order == "BeginMinefield" || order == "PlaceMinefield" {
+                                                        // panic!("order {}", order);
+                                                        None
+                                                    } else {
+                                                        None
+                                                    }
+                                                                                                    
+                                                };
+                                                if pixel.is_some() {
+                                                    image.as_mut_rgba8().unwrap().put_pixel(x as u32, y as u32, pixel.unwrap());
+                                                }
+                                            }
                                         }
+                                        
+                                        
                                    } else {
                                         let x =  reader.read_u32() as i16;
                                         let y =  reader.read_u32() as i16;
                                         let z = reader.read_u32() as u8;
-                                        CPos {
-                                            x, y, z
-                                        }
-                                   };
+                                        
+                                   }
                             },
-                            _ => {
-                                panic!("wtf");
-                            }
-
+                            TargetType::Invalid => {}
                         }
                     }
                     if (flags & OrderFields::TargetString as i16 > 0) {
                         let target_string = reader.read_string();
-                        println!("target_string {}", target_string);
-                        if (order == "SyncInfo") {
-                            sync_info =  target_string; //store the latest
-                        }
+                        // println!("target_string {}", target_string);                        
                     }
                     if (flags & OrderFields::ExtraActors as i16 > 0) {
                         let count =  reader.read_u32();
@@ -413,10 +530,6 @@ fn main() -> Result<(), Error> {
                             vec.push(tmp)
                         }
                     }
-
-                    
-
-                    // return Ok(());
                 },
                 OrderType::SyncHash => {
                     //noop
@@ -430,9 +543,26 @@ fn main() -> Result<(), Error> {
         }
         
         //return Ok(());
+    }        
+    println!("Done.");
+
+
+    let font_data: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    let font: Font<'static> = Font::try_from_bytes(font_data).expect("could not load font");
+
+    for (i, (client_id, player)) in game_information.players.iter().enumerate() {
+        imageproc::drawing::draw_text_mut(&mut image, player.color, 10, 10 + i as u32 * 50, Scale {x: 40.0, y: 40.0},  &font, &player.name);
     }
-    println!("now read in the metadata");
-   
+    imageproc::drawing::draw_text_mut(&mut image, RED, 500, 10, Scale {x: 40.0, y: 40.0},  &font, "Attack/AssaultMove");
+    imageproc::drawing::draw_text_mut(&mut image, GREEN, 500, 60, Scale {x: 40.0, y: 40.0},  &font, "Move");
+    imageproc::drawing::draw_text_mut(&mut image, BLUE, 500, 110, Scale {x: 40.0, y: 40.0},  &font, "PlaceBuilding");
+
+    // image.as_mut_rgba8().unwrap().draw_text(Rgba([255, 0 , 0, 255]), 10, 10, Scale {x: 40.0, y: 40.0}, "hello world");
+    println!("Saving image.");
+
+    image.save("output.png").expect("Could not save output image");
+    println!("Finished");
+
     Ok(())
 }
 
