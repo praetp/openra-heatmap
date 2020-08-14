@@ -20,6 +20,7 @@ use image::{ImageBuffer, Rgb, Rgba};
 use imageproc::drawing::{Canvas, Blend};
 use rusttype::Font;
 use rusttype::Scale;
+use std::path::Path;
 use regex::Regex;
 // use hyper::header::{Headers, ContentDisposition, DispositionType, DispositionParam, Charset};
 
@@ -174,7 +175,7 @@ fn get_map_info(hash: &str) -> Result<MapInfo, Error> {
 fn read_screenshot(path: &str) -> DynamicImage {
     // Use the open function to load an image from a Path.
     // `open` returns a `DynamicImage` on success.
-    let img = image::open(path).unwrap();
+    let img = image::open(path).expect("Could not open screenshot file");
 
     // The dimensions method returns the images width and height.
     println!("dimensions {:?}",GenericImageView::dimensions(&img));
@@ -383,10 +384,16 @@ fn main() -> Result<(), Error> {
     let screenshot_id = find_screenshot_id(map_info.unwrap().id);
     println!("screenshot id {:#?}", screenshot_id);
     if screenshot_id.is_none() {
-        println!("Unfortunately, no screenshot is available for download.. Maybe you could upload one ?");
+        println!("Unfortunately, no screenshot is available for download.. Maybe you could upload one ?"); //TODO: include map name
         return Ok(());
     }
-    let screenshot = download_screenshot(screenshot_id.unwrap());
+    let screenshot = format!("{}.png", screenshot_id.unwrap());
+    if !Path::new(&screenshot).exists() {
+        println!("Screenshot not yet present - need to download it");
+        download_screenshot(screenshot_id.unwrap());
+    } else {
+        println!("Screenshot already there");
+    }
     let mut image = read_screenshot(&screenshot);
 
     // return Ok(());
