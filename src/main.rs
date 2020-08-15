@@ -236,6 +236,7 @@ struct Player {
 }
 
 struct GameInformation {
+    version: String,
     map_uid : String,
     players: HashMap<i32, Player>
 }
@@ -289,8 +290,8 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
     if (start_marker != -1) {
         panic!("Expected start marker");
     }
-    let version = reader.read_i32();
-    println!("version is {}", version);
+    let metadata_version = reader.read_i32();
+    println!("version is {}", metadata_version);
     let strlen = reader.read_i32() as usize;
     /* this string is encoded differently than all other strings.. */
     let metadata = reader.read_string_with_length(strlen);
@@ -301,6 +302,7 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
     let mut color: Option<&str> = None;
     let mut players: HashMap<i32, Player> = HashMap::new();
     let mut map_uid = None;
+    let mut version = None;
     for l in lines {
         let trimmed = l.trim();
         if trimmed.starts_with("Player@") {
@@ -322,11 +324,15 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
         } else if trimmed.starts_with("MapUid:") {
              map_uid = Some(get_rhs(trimmed));
             println!("mapuid is {}", map_uid.unwrap());
-        }
+        }else if trimmed.starts_with("Version:") {
+            version = Some(get_rhs(trimmed));
+           println!("version is {}", version.unwrap());
+       }
     }
     save_player(&mut players, client_id, name, color);
     reader.set_pos(0); //reset to beginning
     GameInformation {
+        version: version.expect("game version must be present").to_string(),
         map_uid : map_uid.expect("mapuid must be present").to_string(),
         players
     }
@@ -336,23 +342,24 @@ fn main() -> Result<(), Error> {
     const RED : Rgba<u8> = Rgba([255, 0 , 0, 255]);
     const GREEN : Rgba<u8>= Rgba([0, 255 , 0, 255]);
     const BLUE : Rgba<u8> = Rgba([0, 0 , 255, 255]);
+    let last_release_with_byte_for_flags: String = String::from("release-20200503"); //why cannot make this a constant ?
     let opts: Opts = Opts::parse();
     println!("Reading replay file from : {}", opts.replay_filename);
 
-    let flagsAreShort : bool = false; //TODO look at the version instead
 
     let file = File::open(opts.replay_filename)?;
     let map = unsafe { Mmap::map(&file)? };
-    let total_len = map.len();
     let mut reader = ReplayReader::new(map);
     let game_information = get_game_information(&mut reader);
+    let flags_are_short : bool = game_information.version == "{{DEV_VERSION}}" 
+                                || game_information.version > last_release_with_byte_for_flags;
+
     let map_info = get_map_info(&game_information.map_uid).expect("Could not get map info");
     
     let screenshot_id = find_screenshot_id(map_info.id);
     println!("screenshot id {:#?}", screenshot_id);
     if screenshot_id.is_none() {
-        println!("Unfortunately, no screenshot is available for download.. Maybe you could upload one ?"); //TODO: include map name
-        return Ok(());
+        return Err(Error::new(ErrorKind::Other, "Unfortunately, no screenshot is available for download.. Maybe you could upload one ?"));
     }
     let screenshot = format!("{}.png", screenshot_id.unwrap());
     if !Path::new(&screenshot).exists() {
@@ -374,14 +381,14 @@ fn main() -> Result<(), Error> {
             break;
         }        
        
-        let packetLen = reader.read_i32() as usize;
-        let rpos: usize = reader.pos() + packetLen as usize;
+        let packet_len = reader.read_i32() as usize;
+        let rpos: usize = reader.pos() + packet_len as usize;
      
-        if packetLen == 5 && reader.at_relative_offset(4) == OrderType::Disconnect as u8 {
-            reader.set_pos(reader.pos() + packetLen);
+        if packet_len == 5 && reader.at_relative_offset(4) == OrderType::Disconnect as u8 {
+            reader.set_pos(reader.pos() + packet_len);
             continue; // disconnect
-        } else if packetLen >= 5 && reader.at_relative_offset(4) == OrderType::SyncHash as u8 {
-            reader.set_pos(reader.pos() + packetLen);
+        } else if packet_len >= 5 && reader.at_relative_offset(4) == OrderType::SyncHash as u8 {
+            reader.set_pos(reader.pos() + packet_len);
             continue; // sync
         }
 
@@ -398,8 +405,8 @@ fn main() -> Result<(), Error> {
                 OrderType::Fields => {
                     let order = reader.read_string();
                     
-                    let mut flags = 0;
-                    if flagsAreShort {
+                    let flags;
+                    if flags_are_short {
                          flags = reader.read_i16();
                     } else {
                         flags = reader.read_u8() as i16;
