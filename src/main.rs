@@ -379,9 +379,9 @@ fn main() -> Result<(), Error> {
     let total_len = map.len();
     let mut reader = ReplayReader::new(map);
     let game_information = get_game_information(&mut reader);
-    let map_info = get_map_info(&game_information.map_uid);
+    let map_info = get_map_info(&game_information.map_uid).expect("Could not get map info");
     
-    let screenshot_id = find_screenshot_id(map_info.unwrap().id);
+    let screenshot_id = find_screenshot_id(map_info.id);
     println!("screenshot id {:#?}", screenshot_id);
     if screenshot_id.is_none() {
         println!("Unfortunately, no screenshot is available for download.. Maybe you could upload one ?"); //TODO: include map name
@@ -395,6 +395,9 @@ fn main() -> Result<(), Error> {
         println!("Screenshot already there");
     }
     let mut image = read_screenshot(&screenshot);
+    let (screenshot_dim_x, screenshot_dim_y) = GenericImageView::dimensions(&image);
+    let x_ratio = screenshot_dim_x as f32 / map_info.width as f32;
+    let y_ratio = screenshot_dim_y as f32 / map_info.height as f32;
 
     // return Ok(());
 
@@ -471,8 +474,8 @@ fn main() -> Result<(), Error> {
 
                                         for xd in -4..5 {
                                             for yd in -4..5 {
-                                                let x = (7.5 + world_x as f32 * 15.35) as i16 + xd;
-                                                let y = (7.5 + world_y as f32 * 15.35) as i16 + yd;
+                                                let x = (x_ratio / 2.0 + world_x as f32 * x_ratio) as i16 + xd;
+                                                let y = (y_ratio / 2.0 + world_y as f32 * y_ratio) as i16 + yd;
                                                 let pixel = if 2 < i16::abs(xd) || 2 < i16::abs(yd) {
                                                     if order == "AttackMove" || order == "AssaultMove" || order == "ForceAttack" || order == "Move" || order == "PlaceBuilding" {
                                                         Some(player.color)
