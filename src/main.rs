@@ -2,9 +2,7 @@ use clap::Clap;
 use memmap::Mmap;
 use std::fs::File;
 use std::io::{Write, Error, ErrorKind};
-use std::io::Read;
 use byteorder::{ByteOrder, LittleEndian};
-use encoding::all::ASCII;
 use encoding::all::UTF_8;
 use encoding::{Encoding, ByteWriter, EncoderTrap, DecoderTrap};
 use num_enum::TryFromPrimitive;
@@ -70,7 +68,7 @@ fn decode_slice(bytes: &[u8], index: &mut usize) -> Result<u32, Error> {
     loop {
         // ReadByte handles end of stream cases for us.
         b = bytes[*index] as u16;
-        let tmp = (b & 0x7F);
+        let tmp = b & 0x7F;
         let tmp2 = (tmp as u32) << shift;
         count |= tmp2 as u32;
         shift += 7;
@@ -95,7 +93,7 @@ fn find_screenshot_id(map_id : u32) -> Option<u32> {
     }
     let client = reqwest::blocking::Client::new();
     let url = format!("{}/{}", "https://resource.openra.net/maps", map_id);
-    let mut response = client                        
+    let response = client
                         .get(&url)
                         .headers(construct_headers())
                         .send()
@@ -111,28 +109,6 @@ fn find_screenshot_id(map_id : u32) -> Option<u32> {
     } else {
         return None;
     }
-
- // let id = object["id"].as_u64();
-    // println!("id: {:?}", id);
-    // let url = ["https://resource.openra.net/screenshots/", &id.unwrap().to_string()].concat();
-    // let response = client.get(&url).send().unwrap();
-    // let mut dest = {
-    //     let fname = response
-    //         .url()
-    //         .path_segments()
-    //         .and_then(|segments| segments.last())
-    //         .and_then(|name| if name.is_empty() { None } else { Some(name) })
-    //         .unwrap_or("tmp.bin");
-
-    //     println!("file to download: '{}'", fname);
-    //     // let fname = tmp_dir.path().join(fname);
-    //     println!("will be located under: '{:?}'", fname);
-    //     File::create(fname)?
-    // };
-    // let content =  response.text().unwrap();
-    // copy(&mut content.as_bytes(), &mut dest)?;
-    // Ok(())
-
 }
 
 struct MapInfo {
@@ -161,15 +137,11 @@ fn get_map_info(hash: &str) -> Result<MapInfo, Error> {
     let width = object["width"].as_str().unwrap().parse::<u16>().expect("cannot parse width");
     // println!("width: {:?}", width);
 
-    
-
     Ok(MapInfo {
         id,
         width,
         height
-    })
-
-   
+    })   
 }
 
 fn read_screenshot(path: &str) -> DynamicImage {
@@ -255,11 +227,6 @@ impl ReplayReader {
     pub fn set_pos(&mut self, pos: usize) {
         self.pos = pos;
     }
-}
-
-enum CommandType {
-    MOVE,
-    ATTACK_MOVE
 }
 
 struct Player {
@@ -372,7 +339,7 @@ fn main() -> Result<(), Error> {
     let opts: Opts = Opts::parse();
     println!("Reading replay file from : {}", opts.replay_filename);
 
-    let flagsAreShort = false; //look at the version instead
+    let flagsAreShort : bool = false; //TODO look at the version instead
 
     let file = File::open(opts.replay_filename)?;
     let map = unsafe { Mmap::map(&file)? };
@@ -399,16 +366,13 @@ fn main() -> Result<(), Error> {
     let x_ratio = screenshot_dim_x as f32 / map_info.width as f32;
     let y_ratio = screenshot_dim_y as f32 / map_info.height as f32;
 
-    // return Ok(());
-
     println!("Reading in frames..");
     loop {
         let client = reader.read_i32();
         
-        if (client == -1) {
+        if client == -1 {
             break;
-        }
-        
+        }        
        
         let packetLen = reader.read_i32() as usize;
         let rpos: usize = reader.pos() + packetLen as usize;
@@ -416,7 +380,7 @@ fn main() -> Result<(), Error> {
         if packetLen == 5 && reader.at_relative_offset(4) == OrderType::Disconnect as u8 {
             reader.set_pos(reader.pos() + packetLen);
             continue; // disconnect
-        } else if (packetLen >= 5 && reader.at_relative_offset(4) == OrderType::SyncHash as u8) {
+        } else if packetLen >= 5 && reader.at_relative_offset(4) == OrderType::SyncHash as u8 {
             reader.set_pos(reader.pos() + packetLen);
             continue; // sync
         }
@@ -435,7 +399,7 @@ fn main() -> Result<(), Error> {
                     let order = reader.read_string();
                     
                     let mut flags = 0;
-                    if (flagsAreShort) {
+                    if flagsAreShort {
                          flags = reader.read_i16();
                     } else {
                         flags = reader.read_u8() as i16;
@@ -443,10 +407,10 @@ fn main() -> Result<(), Error> {
                     // println!("order {}, flags {:#02x}", order, flags);
 
                     
-                    if (flags & OrderFields::Subject as i16 > 0) {
+                    if flags & OrderFields::Subject as i16 > 0 {
                         let subject_id = reader.read_u32();
                     }
-                    if (flags & OrderFields::Target as i16 > 0) {
+                    if flags & OrderFields::Target as i16 > 0 {
                         let target_type_byte = reader.read_u8();
                         let target_type = TargetType::try_from(target_type_byte).unwrap();
                         // println!("target type is {:?}", target_type);
@@ -460,7 +424,7 @@ fn main() -> Result<(), Error> {
                                 let frozen_actor_id =  reader.read_u32();
                             },
                             TargetType::Terrain => {
-                                   if (flags & OrderFields::TargetIsCell as i16 > 0) {
+                                   if flags & OrderFields::TargetIsCell as i16 > 0 {
                                         let cell =  reader.read_u32();
                                         let world_x = (cell >> 20) as i16;
                                         let world_y = ((cell >> 8) & 0xFFF) as i16;
@@ -514,11 +478,11 @@ fn main() -> Result<(), Error> {
                             TargetType::Invalid => {}
                         }
                     }
-                    if (flags & OrderFields::TargetString as i16 > 0) {
+                    if flags & OrderFields::TargetString as i16 > 0 {
                         let target_string = reader.read_string();
                         // println!("target_string {}", target_string);                        
                     }
-                    if (flags & OrderFields::ExtraActors as i16 > 0) {
+                    if flags & OrderFields::ExtraActors as i16 > 0 {
                         let count =  reader.read_u32();
                         let mut vec = Vec::new();
                         for i in 0..count {
@@ -526,13 +490,13 @@ fn main() -> Result<(), Error> {
                             vec.push(tmp)
                         }
                     }
-                    if (flags & OrderFields::ExtraLocation as i16 > 0) {
+                    if flags & OrderFields::ExtraLocation as i16 > 0 {
                         let pos =  reader.read_i32();                        
                     }
-                    if (flags & OrderFields::ExtraData as i16 > 0) {
+                    if flags & OrderFields::ExtraData as i16 > 0 {
                         let extradata =  reader.read_u32();
                     }
-                    if (flags & OrderFields::Grouped as i16 > 0) {
+                    if flags & OrderFields::Grouped as i16 > 0 {
                         let count =  reader.read_i32();
                         let mut vec = Vec::new();
                         for i in 0..count {
