@@ -338,6 +338,13 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
     }
 }
 
+fn enforce_bounds<T>(val: T, min: T, max: T) -> T 
+where
+    T: Ord
+{
+    std::cmp::min(std::cmp::max(val, min), max)
+}
+
 fn main() -> Result<(), Error> {
     const RED : Rgba<u8> = Rgba([255, 0 , 0, 255]);
     const GREEN : Rgba<u8>= Rgba([0, 255 , 0, 255]);
@@ -445,8 +452,8 @@ fn main() -> Result<(), Error> {
 
                                         for xd in -4..5 {
                                             for yd in -4..5 {
-                                                let x = (x_ratio / 2.0 + world_x as f32 * x_ratio) as i16 + xd;
-                                                let y = (y_ratio / 2.0 + world_y as f32 * y_ratio) as i16 + yd;
+                                                let x = (x_ratio / 2.0 + enforce_bounds(world_x, 0, (map_info.width - 1) as i16) as f32 * x_ratio) as i16 + xd;
+                                                let y = (y_ratio / 2.0 + enforce_bounds(world_y, 0, (map_info.height - 1) as i16) as f32 * y_ratio) as i16 + yd;
                                                 let pixel = if 2 < i16::abs(xd) || 2 < i16::abs(yd) {
                                                     if order == "AttackMove" || order == "AssaultMove" || order == "ForceAttack" || order == "Move" || order == "PlaceBuilding" {
                                                         Some(player.color)
