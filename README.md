@@ -13,4 +13,4 @@ The map needs to have a corresponding screenshot present on https://resource.ope
 Without a screenshot, it does not work. If your favorite map does not have a screenshot yet, maybe you can upload one ?
 
 # Example output
-![example output](example.png)
+![example output](example.jpg)
