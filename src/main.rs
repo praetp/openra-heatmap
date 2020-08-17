@@ -4,29 +4,25 @@ use std::fs::File;
 use std::io::{Write, Error, ErrorKind};
 use byteorder::{ByteOrder, LittleEndian};
 use encoding::all::UTF_8;
-use encoding::{Encoding, ByteWriter, EncoderTrap, DecoderTrap};
+use encoding::{Encoding, DecoderTrap};
 use num_enum::TryFromPrimitive;
 use std::convert::TryFrom;
 use serde_json::{Value};
-use std::io::copy;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, CONTENT_ENCODING, ACCEPT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use std::collections::HashMap;
 use image::GenericImageView;
 use image::DynamicImage;
-use image::{Pixel, Pixels};
-use image::{ImageBuffer, Rgb, Rgba};
-use imageproc::drawing::{Canvas, Blend};
+use image::{Rgba};
 use rusttype::Font;
 use rusttype::Scale;
 use std::path::Path;
 use regex::Regex;
-// use hyper::header::{Headers, ContentDisposition, DispositionType, DispositionParam, Charset};
 
 #[macro_use] extern crate lazy_static;
 use bytes::Buf;
 
 #[derive(Clap)]
-#[clap(version = "1.0", author = "Paul P.")]
+#[clap(version = "0.1", author = "Paul P.")]
 struct Opts {
     replay_filename: String
 }
@@ -98,10 +94,7 @@ fn find_screenshot_id(map_id : u32) -> Option<u32> {
                         .headers(construct_headers())
                         .send()
                         .unwrap();
-    println!("response {:?}", response);
     let buffer = response.text().expect("cannot read response");
-    println!("buffer {}", buffer);
-
     
     if RE.is_match(&buffer) {
         let caps = RE.captures(&buffer).unwrap();
@@ -150,10 +143,10 @@ fn read_screenshot(path: &str) -> DynamicImage {
     let img = image::open(path).expect("Could not open screenshot file");
 
     // The dimensions method returns the images width and height.
-    println!("dimensions {:?}",GenericImageView::dimensions(&img));
+    // println!("dimensions {:?}",GenericImageView::dimensions(&img));
 
     // The color method returns the image's `ColorType`.
-    println!("{:?}", img.color());
+    // println!("{:?}", img.color());
 
     img
 }
@@ -230,7 +223,7 @@ impl ReplayReader {
 }
 
 struct Player {
-    client_id: i32,
+    _client_id: i32,
     name: String,
     color: Rgba<u8>
 }
@@ -246,17 +239,14 @@ fn download_screenshot(screenshot_id : u32) -> String {
    
     let url = format!("{}/{}", "https://resource.openra.net/screenshots", screenshot_id);
     let response = client.get(&url).send();
-    println!("Response {:?}", response);
     let response = response.expect("response problem");
-    let header = response.headers().get(reqwest::header::CONTENT_DISPOSITION).expect("Expected content-disposition");
-    let disp = header.to_str().expect("header was not a string");
 
     let fname = format!("{}.png", screenshot_id);
     let mut dest = {
         
-        println!("file to download: '{}'", fname);
+        // println!("file to download: '{}'", fname);
         // let fname = tmp_dir.path().join(fname);
-        println!("will be located under: '{:?}'", fname);
+        // println!("will be located under: '{:?}'", fname);
         File::create(fname.clone()).expect("Could not create file")
     };
     let content =  response.bytes().expect("Could not get bytes");
@@ -271,7 +261,7 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
         let color =  i32::from_str_radix(color.expect("color must be present"), 16).expect("could not parse color");
         let color_vector = [(color >> 16) as u8, (color >> 8) as u8, color as u8, 255];
         players.insert(client_id_raw, Player {
-            client_id: client_id_raw,
+            _client_id: client_id_raw,
             name: name.expect("name must be present").to_string(),
             color: Rgba(color_vector)
         });
@@ -282,12 +272,12 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
     reader.set_pos(total_len - 8);
     let metadata_len = reader.read_i32() as usize;
     let marker = reader.read_i32();
-    if (marker != -2) {
+    if marker != -2 {
         panic!("End marker NOK")
     }
     reader.set_pos(total_len - (8 + metadata_len + 8));
     let start_marker = reader.read_i32();
-    if (start_marker != -1) {
+    if start_marker != -1 {
         panic!("Expected start marker");
     }
     let metadata_version = reader.read_i32();
@@ -295,7 +285,7 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
     let strlen = reader.read_i32() as usize;
     /* this string is encoded differently than all other strings.. */
     let metadata = reader.read_string_with_length(strlen);
-    println!("metadata {}", metadata);
+    // println!("metadata {}", metadata);
     let lines: Vec<_> = metadata.lines().collect();
     let mut client_id:Option<i32> = None;
     let mut name: Option<&str> = None;
@@ -324,7 +314,7 @@ fn get_game_information(reader : &mut ReplayReader) -> GameInformation {
         } else if trimmed.starts_with("MapUid:") {
              map_uid = Some(get_rhs(trimmed));
             println!("mapuid is {}", map_uid.unwrap());
-        }else if trimmed.starts_with("Version:") {
+        } else if trimmed.starts_with("Version:") {
             version = Some(get_rhs(trimmed));
            println!("version is {}", version.unwrap());
        }
@@ -399,15 +389,15 @@ fn main() -> Result<(), Error> {
             continue; // sync
         }
 
-        let frame = reader.read_i32();
+        let _frame = reader.read_i32();
         while reader.pos() < rpos {
             let ordertypebyte = reader.read_u8();
-            let ordertype = OrderType::try_from(ordertypebyte).unwrap();
+            let ordertype = OrderType::try_from(ordertypebyte).expect("Could not convert byte to ordertype");
             match ordertype {
                 OrderType::Handshake => {
                    
-                        let name = reader.read_string();
-                        let targetstring = reader.read_string();
+                        let _name = reader.read_string();
+                        let _targetstring = reader.read_string();
                 },
                 OrderType::Fields => {
                     let order = reader.read_string();
@@ -422,28 +412,28 @@ fn main() -> Result<(), Error> {
 
                     
                     if flags & OrderFields::Subject as i16 > 0 {
-                        let subject_id = reader.read_u32();
+                        let _subject_id = reader.read_u32();
                     }
                     if flags & OrderFields::Target as i16 > 0 {
                         let target_type_byte = reader.read_u8();
-                        let target_type = TargetType::try_from(target_type_byte).unwrap();
+                        let target_type = TargetType::try_from(target_type_byte).expect("Could not convert byte to target type");
                         // println!("target type is {:?}", target_type);
                         match target_type {
                             TargetType::Actor => {
-                                let actor_id = reader.read_u32();
+                                let _actor_id = reader.read_u32();
 
                             },
                             TargetType::FrozenActor => {
-                                let player_actor_id =  reader.read_u32();
-                                let frozen_actor_id =  reader.read_u32();
+                                let _player_actor_id =  reader.read_u32();
+                                let _frozen_actor_id =  reader.read_u32();
                             },
                             TargetType::Terrain => {
                                    if flags & OrderFields::TargetIsCell as i16 > 0 {
                                         let cell =  reader.read_u32();
                                         let world_x = (cell >> 20) as i16;
                                         let world_y = ((cell >> 8) & 0xFFF) as i16;
-                                        let world_z = cell as u8;
-                                        let subcell = reader.read_u8();
+                                        let _world_z = cell as u8;
+                                        let _subcell = reader.read_u8();
                                        
                                         let player = game_information.players.get(&client).expect("unknown client-id");
                                         
@@ -483,9 +473,9 @@ fn main() -> Result<(), Error> {
                                         
                                         
                                    } else {
-                                        let x =  reader.read_u32() as i16;
-                                        let y =  reader.read_u32() as i16;
-                                        let z = reader.read_u32() as u8;
+                                        let _x =  reader.read_u32() as i16;
+                                        let _y =  reader.read_u32() as i16;
+                                        let _z = reader.read_u32() as u8;
                                         
                                    }
                             },
@@ -493,27 +483,27 @@ fn main() -> Result<(), Error> {
                         }
                     }
                     if flags & OrderFields::TargetString as i16 > 0 {
-                        let target_string = reader.read_string();
+                        let _target_string = reader.read_string();
                         // println!("target_string {}", target_string);                        
                     }
                     if flags & OrderFields::ExtraActors as i16 > 0 {
                         let count =  reader.read_u32();
                         let mut vec = Vec::new();
-                        for i in 0..count {
+                        for _ in 0..count {
                             let tmp =  reader.read_u32();
                             vec.push(tmp)
                         }
                     }
                     if flags & OrderFields::ExtraLocation as i16 > 0 {
-                        let pos =  reader.read_i32();                        
+                        let _pos =  reader.read_i32();                        
                     }
                     if flags & OrderFields::ExtraData as i16 > 0 {
-                        let extradata =  reader.read_u32();
+                        let _extradata =  reader.read_u32();
                     }
                     if flags & OrderFields::Grouped as i16 > 0 {
                         let count =  reader.read_i32();
                         let mut vec = Vec::new();
-                        for i in 0..count {
+                        for _ in 0..count {
                             let tmp =  reader.read_u32();
                             vec.push(tmp)
                         }
@@ -538,7 +528,7 @@ fn main() -> Result<(), Error> {
     let font_data: &[u8] = include_bytes!("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
     let font: Font<'static> = Font::try_from_bytes(font_data).expect("could not load font");
 
-    for (i, (client_id, player)) in game_information.players.iter().enumerate() {
+    for (i, (_, player)) in game_information.players.iter().enumerate() {
         imageproc::drawing::draw_text_mut(&mut image, player.color, 10, 10 + i as u32 * 50, Scale {x: 40.0, y: 40.0},  &font, &player.name);
     }
     imageproc::drawing::draw_text_mut(&mut image, RED, 500, 10, Scale {x: 40.0, y: 40.0},  &font, "Attack/AssaultMove");
