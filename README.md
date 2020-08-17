@@ -5,6 +5,7 @@ This program will take in an OpenRA replay and produce an image of the game's ma
 It the end, the goal is that this program will read in multiple game replays of the same map and produce a heatmap that shows which parts of the map are 'hot'.
 
 # How to run
+- Read the code first.. Or are you just going to clone this, build and run it ? Who knows what it does to your computer. Just kidding, you'll be fine :)
 - `cargo run <your replay file>` (the first time you do run this, it will build the program - this takes a few minutes).
 Note that you need the Rust build tools.
 - Now you can open 'output.png' with your favorite image viewing tool.
