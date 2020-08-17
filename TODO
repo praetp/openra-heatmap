@@ -1,0 +1,3 @@
+- Support other formats than png (both for input and output)
+- Have a look at the coordinates, they're not entirely correct I think
+- Make actual heatmap
