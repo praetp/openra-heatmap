@@ -349,6 +349,7 @@ fn main() -> Result<(), Error> {
     let mut reader = ReplayReader::new(map);
     let game_information = get_game_information(&mut reader);
     let flags_are_short : bool = game_information.version == "{{DEV_VERSION}}" 
+                                || game_information.version.starts_with("playtest")
                                 || game_information.version > last_release_with_byte_for_flags;
 
     let map_info = get_map_info(&game_information.map_uid).expect("Could not get map info");
